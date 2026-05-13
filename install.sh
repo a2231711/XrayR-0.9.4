@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================
-# XrayR 一键安装脚本（官方预编译版）
+# XrayR 一键安装脚本（纯源码编译版，仅依赖你的仓库）
 # 仓库地址：https://github.com/a2231711/XrayR-0.9.4
 # ============================================
 
@@ -42,41 +42,57 @@ if [[ $(getconf LONG_BIT) != "64" ]]; then
     exit 1
 fi
 
-# 定义变量
+# 定义变量（只依赖你自己的仓库）
+GIT_REPO="https://github.com/a2231711/XrayR-0.9.4.git"
+SRC_DIR="/root/xrayr_src"
 INSTALL_DIR="/usr/local/XrayR"
 SERVICE_FILE="/etc/systemd/system/XrayR.service"
 CONFIG_FILE="${INSTALL_DIR}/config.yml"
-BINARY_URL="https://github.com/XrayR-project/XrayR/releases/latest/download/XrayR-linux-amd64.zip"
 
-echo -e "${green}=== 开始安装 XrayR ===${plain}"
+echo -e "${green}=== 开始安装 XrayR（源码编译版） ===${plain}"
 
-# 安装依赖
-echo -e "${yellow}1. 安装依赖包...${plain}"
+# 1. 安装基础依赖
+echo -e "${yellow}1. 安装基础依赖包...${plain}"
 if [[ ${release} == "centos" ]]; then
-    yum install -y wget unzip curl
+    yum install -y wget curl git
 else
-    apt update -y && apt install -y wget unzip curl
+    apt update -y && apt install -y wget curl git
 fi
 
-# 创建目录
-mkdir -p ${INSTALL_DIR}
-cd ${INSTALL_DIR} || exit
+# 2. 安装 Go 环境（稳定版）
+echo -e "${yellow}2. 安装 Go 编译环境...${plain}"
+if ! command -v go &> /dev/null; then
+    wget https://dl.google.com/go/go1.21.13.linux-amd64.tar.gz
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf go1.21.13.linux-amd64.tar.gz
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+    source /etc/profile
+    rm -f go1.21.13.linux-amd64.tar.gz
+fi
 
-# 下载预编译二进制文件
-echo -e "${yellow}2. 下载官方预编译程序...${plain}"
-wget -O XrayR.zip ${BINARY_URL}
-if [[ $? -ne 0 ]]; then
-    echo -e "${red}下载失败，请检查网络！${plain}"
+# 3. 拉取你自己仓库的源码
+echo -e "${yellow}3. 拉取你的源码仓库...${plain}"
+rm -rf ${SRC_DIR}
+git clone ${GIT_REPO} ${SRC_DIR}
+cd ${SRC_DIR} || exit
+
+# 4. 编译程序（跳过安全校验，强制编译）
+echo -e "${yellow}4. 编译 XrayR 程序...${plain}"
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o XrayR main.go
+
+if [[ ! -f XrayR ]]; then
+    echo -e "${red}编译失败，请检查源码是否完整！${plain}"
     exit 1
 fi
 
-# 解压
-unzip -o XrayR.zip
-rm -f XrayR.zip
-chmod +x XrayR
+# 5. 安装程序
+echo -e "${yellow}5. 安装程序到系统目录...${plain}"
+mkdir -p ${INSTALL_DIR}
+cp -f XrayR ${INSTALL_DIR}/
+chmod +x ${INSTALL_DIR}/XrayR
 
-# 写入配置文件（这里是模板，你后续可在服务器上手动修改）
-echo -e "${yellow}3. 写入基础配置文件...${plain}"
+# 6. 写入配置文件（模板，后续可修改）
+echo -e "${yellow}6. 写入基础配置文件...${plain}"
 cat > ${CONFIG_FILE} << EOF
 Log:
   Level: warning
@@ -96,8 +112,8 @@ Nodes:
     EnableVless: false
 EOF
 
-# 写入 systemd 服务文件
-echo -e "${yellow}4. 配置系统服务...${plain}"
+# 7. 配置 systemd 服务
+echo -e "${yellow}7. 配置系统服务...${plain}"
 cat > ${SERVICE_FILE} << EOF
 [Unit]
 Description=XrayR Service
@@ -116,7 +132,7 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
 
-# 启用并启动服务
+# 8. 启动服务
 systemctl daemon-reload
 systemctl enable XrayR
 systemctl start XrayR
